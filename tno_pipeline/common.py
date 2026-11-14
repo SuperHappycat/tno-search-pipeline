@@ -118,13 +118,6 @@ def _equatorial_basis(ra0, dec0):
 
 
 def observer_tangential(mjd, ra0, dec0):
-    """Observer (geocentre) heliocentric position projected onto the tangent-plane axes.
-
-    Returns (b_e, b_n) in AU: the east and north components of Earth's heliocentric
-    position at each epoch. These are the parallax factors - the de-parallax transform
-    subtracts b/distance from each detection. Geocentric is used (not topocentric);
-    the ~6000 km topocentric term is < 0.01 arcsec at 40 AU and negligible here.
-    """
     import astropy.units as u
     from astropy.coordinates import get_body_barycentric, solar_system_ephemeris
     from astropy.time import Time
