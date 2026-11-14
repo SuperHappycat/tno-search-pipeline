@@ -1,0 +1,9 @@
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+pyarrow>=14
+astropy>=5.3
+astroquery>=0.4.7
+pyvo>=1.5
+numba>=0.59
+matplotlib>=3.7
