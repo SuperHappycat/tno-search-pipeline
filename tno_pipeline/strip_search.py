@@ -58,15 +58,29 @@ def run_field(ra, dec, size, outdir, delete_tiles, do_stage4, grades):
                               window_scale=1.5, max_window=45.0, vprior=2.0, pos_cell=3.0,
                               vel_cells=8.0, min_det=3, min_nights=3, rms_tol=0.5,
                               collapse=True, collapse_radius=1.5, max_dmag=1.0, bound_factor=1.5)
-    rep = None
-    if do_stage4 and not cand.empty and (cand["grade"].isin(list(grades))).any():
+    # cross-match grade A/B against known minor planets, using the observed positions in orphans
+    if not cand.empty and do_stage4:
         try:
-            rep = stage4_verify.run(cfg, grades=tuple(grades), do_cutouts=True)
+            cand = stage4_verify.annotate_known(cand, orph, grades=("A", "B"))
         except Exception as e:
-            log.warning("stage4 failed for %s: %s", cfg.tag, e)
+            log.warning("cross-match failed for %s: %s", cfg.tag, e)
+            cand["known_object"] = ""
+    elif not cand.empty:
+        cand["known_object"] = ""
+    # cutouts only for the real shortlist: grade-A that is NOT a known object
+    if do_stage4 and not cand.empty:
+        shortlist = cand[(cand["grade"] == "A") & (cand["known_object"] == "")]
+        orph_ix = orph.set_index("id")
+        outdir = cfg.path("cutouts"); outdir.mkdir(exist_ok=True)
+        for i, c in shortlist.iterrows():
+            try:
+                stage4_verify.cutout_grid(c, orph_ix, outdir / f"cand_{i:04d}.png")
+            except Exception as e:
+                log.warning("cutout failed for %s cand %d: %s", cfg.tag, i, e)
     nA = int((cand["grade"] == "A").sum()) if not cand.empty else 0
-    log.info("field %s done in %.0f s: %d candidates, %d grade-A", cfg.tag, time.time() - t0,
-             len(cand), nA)
+    nA_new = int(((cand["grade"] == "A") & (cand["known_object"] == "")).sum()) if not cand.empty else 0
+    log.info("field %s done in %.0f s: %d candidates, %d grade-A (%d unmatched by SkyBoT)",
+             cfg.tag, time.time() - t0, len(cand), nA, nA_new)
     cand["field"] = cfg.tag
     return cand
 
@@ -109,15 +123,26 @@ def main(argv=None):
     if combined.empty:
         lines.append("No candidates produced.")
     else:
-        for g in ("A", "B"):
-            sub = combined[combined["grade"] == g]
-            lines.append(f"## Grade {g}: {len(sub)} candidate(s)")
-            if len(sub):
-                cols = ["field", "dist_au", "n_nights", "arc_days", "ra_ref", "dec_ref",
-                        "true_rate", "fwhm_min", "fwhm_max", "rms", "mag_mean", "best_filter"]
-                cols = [c for c in cols if c in sub.columns]
-                lines.append(sub[cols].round(3).to_string(index=False))
-            lines.append("")
+        kcol = "known_object" if "known_object" in combined.columns else None
+        ga = combined[combined["grade"] == "A"]
+        new = ga[ga[kcol] == ""] if kcol else ga
+        known = ga[ga[kcol] != ""] if kcol else ga.iloc[0:0]
+        cols = ["field", "dist_au", "n_nights", "arc_days", "ra_ref", "dec_ref",
+                "true_rate", "fwhm_min", "fwhm_max", "rms", "mag_mean", "best_filter"]
+        cols = [c for c in cols if c in combined.columns]
+        lines.append(f"## Grade A, UNMATCHED by SkyBoT: {len(new)} candidate(s) -- the shortlist")
+        lines.append(new[cols].round(3).to_string(index=False) if len(new) else "(none)")
+        lines.append("")
+        lines.append(f"## Grade A, already-known objects: {len(known)}")
+        if len(known):
+            kc = cols + [kcol]
+            lines.append(known[kc].round(3).to_string(index=False))
+        lines.append("")
+        nb_new = int((combined["grade"] == "B") & (combined.get(kcol, "") == "")) if kcol else len(combined[combined.grade=="B"])
+        nb = combined[combined["grade"] == "B"]
+        nb_new = len(nb[nb[kcol] == ""]) if kcol else len(nb)
+        lines.append(f"## Grade B: {len(nb)} ({nb_new} unmatched) -- weaker, see strip_candidates.parquet")
+        lines.append("")
     (out / "strip_report.md").write_text("\n".join(lines))
     log.info("STRIP COMPLETE in %.0f min -> %s", (time.time() - t0) / 60, out / "strip_report.md")
     print("\n".join(lines))

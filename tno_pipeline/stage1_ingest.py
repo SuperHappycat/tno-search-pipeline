@@ -31,6 +31,7 @@ COLUMNS = [
     "measid", "objectid", "exposure", "ccdnum", "filter", "mjd",
     "ra", "dec", "raerr", "decerr",
     "mag_auto", "magerr_auto", "fwhm", "class_star", "flags",
+    "asemi", "bsemi",
 ]
 
 
@@ -206,6 +207,9 @@ def quality_cuts(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     m = np.isfinite(df["ra"]) & np.isfinite(df["dec"]) & np.isfinite(df["mjd"])
     m &= df["magerr_auto"].between(0, cfg.max_magerr) & (df["mag_auto"] < 50)
     m &= df["fwhm"].between(cfg.min_fwhm, cfg.max_fwhm)
+    if {"asemi", "bsemi"}.issubset(df.columns):           # reject trails / streaks (elongated)
+        axratio = df["asemi"] / df["bsemi"].clip(lower=1e-3)
+        m &= axratio.between(0, cfg.max_axis_ratio) & (df["asemi"] < cfg.max_asemi)
     if cfg.decam_only:
         m &= df["exposure"].astype(str).str.startswith("c4d")
     if cfg.require_flags_zero:

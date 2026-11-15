@@ -78,6 +78,27 @@ def crossmatch_skybot(nights, match_radius=10.0, observer="W84"):
     return matched, details
 
 
+def annotate_known(cand: pd.DataFrame, orphans: pd.DataFrame, grades=("A", "B"),
+                   match_radius=10.0, observer="W84") -> pd.DataFrame:
+    """Add a `known_object` column: for each candidate in the given grades, cross-match its
+    per-night observed positions against SkyBoT. Empty string means no known object (a real
+    shortlist item); a name means it is that catalogued minor planet. Other grades get "".
+    """
+    o = orphans.set_index("id") if "id" in orphans.columns else orphans
+    names = []
+    for _, c in cand.iterrows():
+        if c.get("grade") not in grades:
+            names.append(""); continue
+        sub = o.loc[[i for i in c["det_ids"] if i in o.index]].copy()
+        sub["ngt"] = np.floor(sub["mjd"] - 0.7).astype(int)
+        per = sub.groupby("ngt").agg(mjd=("mjd", "mean"), ra=("ra", "mean"), dec=("dec", "mean"))
+        name, _ = crossmatch_skybot(list(per.itertuples(index=False, name=None)),
+                                    match_radius, observer)
+        names.append(name or "")
+    cand = cand.copy(); cand["known_object"] = names
+    return cand
+
+
 # ----------------------------------------------------------------------------
 # 2. Image cutouts (NOIRLab SIA) + PNG grid
 # ----------------------------------------------------------------------------
@@ -97,8 +118,22 @@ def _sia_search(sia_url, ra, dec, size_deg, retries=3):
     return None
 
 
+SIA_COLLECTIONS = ["nsc_dr2", "des_dr2", "calibrated_all", "nsa"]
+
+
 def sia_cutout(ra, dec, mjd, filt=None, size_pix=64, pixscale=0.263, day_tol=2.0,
-               sia_url="https://datalab.noirlab.edu/sia/nsc_dr2"):
+               sia_url=None):
+    """Try several SIA collections until one yields a same-night science cutout."""
+    collections = [sia_url] if sia_url else SIA_COLLECTIONS
+    for coll in collections:
+        base = coll if str(coll).startswith("http") else f"https://datalab.noirlab.edu/sia/{coll}"
+        img = _sia_cutout_one(ra, dec, mjd, filt, size_pix, pixscale, day_tol, base)
+        if img is not None:
+            return img
+    return None
+
+
+def _sia_cutout_one(ra, dec, mjd, filt, size_pix, pixscale, day_tol, sia_url):
     """Fetch the DECam science cutout from the SAME night as the detection.
 
     The NOIRLab `nsa` SIA v1 service returns every overlapping product across all epochs,
@@ -117,7 +152,7 @@ def sia_cutout(ra, dec, mjd, filt=None, size_pix=64, pixscale=0.263, day_tol=2.0
 
     size_deg = size_pix * pixscale / 3600.0
     tbl = None
-    for sz in (size_deg, 3 * size_deg):                    # widen once if nothing overlaps
+    for sz in (0.05, 0.15):                                # search box to find the overlapping exposure
         try:
             tbl = _sia_search(sia_url, ra, dec, sz)
         except Exception as exc:
@@ -142,7 +177,8 @@ def sia_cutout(ra, dec, mjd, filt=None, size_pix=64, pixscale=0.263, day_tol=2.0
         m &= np.char.startswith(np.char.lower(bp.astype(str)), filt.lower())
     mj = col("mjd_obs")
     if mj is not None:
-        m &= np.abs(mj.astype(float) - mjd) <= day_tol     # same night
+        mj = np.array([float(v) if str(v) not in ("", "--", "None", "nan") else np.nan for v in mj])
+        m &= np.isfinite(mj) & (np.abs(mj - mjd) <= day_tol)   # same night
     idx = np.flatnonzero(m)
     nkept = len(idx)
     if nkept == 0:
@@ -150,7 +186,7 @@ def sia_cutout(ra, dec, mjd, filt=None, size_pix=64, pixscale=0.263, day_tol=2.0
                  ra, dec, len(tbl))
         return None
     if mj is not None:                                     # nearest in time among the matches
-        idx = idx[np.argsort(np.abs(mj[idx].astype(float) - mjd))]
+        idx = idx[np.argsort(np.abs(mj[idx] - mjd))]
 
     url_col = cols.get("access_url") or cols.get("accref") or cols.get("acref")
     for i in idx:

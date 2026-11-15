@@ -28,6 +28,8 @@ class Config:
     max_magerr: float = 0.35    # ~3 sigma; faint TNOs live near the limit
     min_fwhm: float = 0.5       # arcsec; rejects cosmic rays / hot pixels
     max_fwhm: float = 3.0       # arcsec; rejects blends and extended junk
+    max_axis_ratio: float = 1.8 # reject elongated detections (satellite/cosmic-ray trails)
+    max_asemi: float = 2.5      # arcsec; reject very extended major axis (trails, big galaxies)
     require_flags_zero: bool = False
 
     # ---- Stage 1: stationary-source rejection --------------------------
