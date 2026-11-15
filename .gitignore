@@ -1,0 +1,9 @@
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Pipeline run outputs (generated data; large parquet, cutouts, reports)
+tno_deep/
+tno_strip/
+*.parquet
+cutouts/
